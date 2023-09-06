@@ -1,68 +1,37 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
+import { PDFDocument, PDFDict, asPDFName, PDFString } from 'pdf-lib'
+
+// Electron provides file paths
+interface ElectronFile extends File {
+	path: string
+}
 
 // Remember to rename these classes and interfaces!
 
-interface MyPluginSettings {
+interface PdfAnchorSettings {
 	mySetting: string;
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
+const DEFAULT_SETTINGS: PdfAnchorSettings = {
 	mySetting: 'default'
 }
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+export default class PdfAnchor extends Plugin {
+	settings: PdfAnchorSettings;
 
 	async onload() {
 		await this.loadSettings();
-
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
+		
 		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
+			id: 'convert-internal-links-to-dummies',
+			name: 'Convert all internal links to dummies',
+			callback: () => this.convertAllInternalLinksToDummiesCommand()
 		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
+		this.addCommand({
+			id: 'convert-dummies-to-anchors',
+			name: 'Convert dummies to anchors',
+			callback: () => this.convertDummiesToAnchorsCommand()
 		});
 
 		// This adds a settings tab so the user can configure various aspects of the plugin
@@ -73,6 +42,26 @@ export default class MyPlugin extends Plugin {
 		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
 			console.log('click', evt);
 		});
+
+		this.registerDomEvent(window, 'beforeprint', (evt: Event) => {
+			console.log('beforeprint', evt);
+			console.log( JSON.stringify(evt) );
+		});
+
+		this.registerDomEvent(window, 'afterprint', (evt: Event) => {
+			console.log('afterprint', evt);
+			console.log( JSON.stringify(evt) );
+		});
+
+		var t = window.require("electron").ipcRenderer;
+		t.on( "print-to-pdf", (evt:Event,b:any) => {
+			// debugger;
+			console.log( b );
+			console.log('print-to-pdf', evt);
+			console.log( evt );
+			console.log( JSON.stringify(evt) );
+			//console.log( evt.emitter.send("print-to-pdf", {}) )
+		})
 
 		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
 		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
@@ -89,28 +78,117 @@ export default class MyPlugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
+
+	async reportError( message:string ){
+		console.log( message );
+		new Notice( message );
+	}
+
+	async openFileDialog( cb:Function ) {
+		let input = document.createElement('input');
+		input.type = 'file';
+		input.onchange = _ => {
+		  // you can use this method to get file and perform respective operations
+				  // let files = Array.from(input.files);
+				  // console.log( input.files );
+				  cb( input.files );
+			  };
+		input.click();
+	}
+
+	async convertDummiesToAnchorsCommand() {
+		// I hate javascript
+		this.openFileDialog( (files:FileList) => {
+			this.getContentsOfFile( files[0], (fileBuffer:ArrayBuffer) =>{
+				this.convertDummiesToAnchors( fileBuffer );
+			})
+		} );
+	}
+
+	async getContentsOfFile( file:File, cb:Function ) {
+		
+		const reader = new FileReader()
+		
+		let fileResult: any
+		
+		reader.onload = () => {
+			fileResult = reader.result
+			cb( fileResult );
+		}
+		
+		// reader.onerror = (error) => {
+		// 	reject(error)
+		// }
+		// reader.onloadend = () => {
+		// 	resolve(fileResult)
+		// }
+		reader.readAsArrayBuffer( file );
+	}
+
+	async convertDummiesToAnchors( pdfBuffer:ArrayBuffer ) {
+		
+		// debugger;
+		const pdfDoc = await PDFDocument.load( pdfBuffer );
+		const pages = pdfDoc.getPages();
+		pages.forEach((p) => {
+			p.node
+			.Annots()
+			?.asArray()
+			.forEach((a) => {
+				const dict = pdfDoc.context.lookupMaybe(a, PDFDict);
+				const aRecord = dict?.get(asPDFName(`A`));
+				const link = pdfDoc.context.lookupMaybe(aRecord, PDFDict);
+				const uri = link?.get( asPDFName("URI") )?.toString();//.slice(1, -1); // get the original link, remove parenthesis
+				console.log( uri );
+				// if (uri.startsWith("http"))
+				// 	link!.set(asPDFName("URI"), PDFString.of( /*Wathever value*/ )); // update link value
+			});
+		});
+	}
+
+	async convertAllInternalLinksToDummiesCommand() {
+		const currentFile = this.app.workspace.getActiveFile();
+		if( !currentFile ) this.reportError( "Couldn't get active file" );
+		this.convertAllInternalLinksToDummies( currentFile! );
+	}
+
+	async convertAllInternalLinksToDummies( noteFile : TFile ) {
+		
+		/* based heavliy on https://github.com/dy-sh/obsidian-consistent-attachments-and-links */
+
+		const links = this.app.metadataCache.getCache( noteFile.path )?.links;
+		let noteText = await this.app.vault.read( noteFile );
+		
+		if (links) {
+			for (let link of links) {
+
+				// we're only interested in links to headings in the current note 
+				if( !link.original.startsWith("[[#") )
+					continue
+
+				console.log( link );
+
+				let anchor = encodeURI(link.link);
+				let dummyLink = `http://uk.co.prehensile.dummy/dummy${anchor}`;
+				console.log( dummyLink );
+
+				let dummyMarkdown = `[${link.displayText}](${dummyLink})`;
+
+				// rewrite link to an external dummy link
+				noteText = noteText.replace( link.original, dummyMarkdown );
+			}
+		}
+
+		// write noteText back to original file
+		await this.app.vault.modify( noteFile, noteText );
+	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
 
 class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+	plugin: PdfAnchor;
 
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: PdfAnchor) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
