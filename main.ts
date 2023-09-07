@@ -1,23 +1,36 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
-import { PDFDocument, PDFDict, asPDFName, PDFString } from 'pdf-lib'
+import { readFileSync, writeFileSync } from 'fs';
+import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, loadPdfJs } from 'obsidian';
+import { PDFDocument, PDFDict, asPDFName, PDFString, PDFPage, PDFPageTree, PDFArray, PDFNull } from 'pdf-lib'
 
 // Electron provides file paths
 interface ElectronFile extends File {
 	path: string
 }
 
+interface OutlineItem {
+	display : string,
+	pageNumber : number,
+	height : number,
+	item : any
+}
+
 // Remember to rename these classes and interfaces!
 
 interface PdfAnchorSettings {
 	mySetting: string;
+	maxHeadingDepth: number 
 }
 
 const DEFAULT_SETTINGS: PdfAnchorSettings = {
-	mySetting: 'default'
+	mySetting: 'default',
+	maxHeadingDepth: 3
 }
 
 export default class PdfAnchor extends Plugin {
+	
 	settings: PdfAnchorSettings;
+
+	readonly _dummyBaseUrl = "http://dummy.link/dummy";
 
 	async onload() {
 		await this.loadSettings();
@@ -37,6 +50,7 @@ export default class PdfAnchor extends Plugin {
 		// This adds a settings tab so the user can configure various aspects of the plugin
 		this.addSettingTab(new SampleSettingTab(this.app, this));
 
+		/*
 		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
 		// Using this function will automatically remove the event listener when this plugin is disabled.
 		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
@@ -65,6 +79,7 @@ export default class PdfAnchor extends Plugin {
 
 		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
 		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+		*/
 	}
 
 	onunload() {
@@ -85,24 +100,20 @@ export default class PdfAnchor extends Plugin {
 	}
 
 	async openFileDialog( cb:Function ) {
+		// see https://forum.obsidian.md/t/file-open-dialog/47325
 		let input = document.createElement('input');
 		input.type = 'file';
 		input.onchange = _ => {
-		  // you can use this method to get file and perform respective operations
-				  // let files = Array.from(input.files);
-				  // console.log( input.files );
-				  cb( input.files );
-			  };
+			cb( input.files );
+		};
 		input.click();
 	}
 
 	async convertDummiesToAnchorsCommand() {
-		// I hate javascript
 		this.openFileDialog( (files:FileList) => {
-			this.getContentsOfFile( files[0], (fileBuffer:ArrayBuffer) =>{
-				this.convertDummiesToAnchors( fileBuffer );
-			})
-		} );
+			this.convertDummiesToAnchors(
+				(files[0] as ElectronFile).path );
+		});
 	}
 
 	async getContentsOfFile( file:File, cb:Function ) {
@@ -124,26 +135,167 @@ export default class PdfAnchor extends Plugin {
 		// }
 		reader.readAsArrayBuffer( file );
 	}
-
-	async convertDummiesToAnchors( pdfBuffer:ArrayBuffer ) {
+	
+	async getOutlineForPdf( pdfBuffer:ArrayBuffer ) {
+		const pdfjsLib = await loadPdfJs();
+		const pdf = await pdfjsLib.getDocument( pdfBuffer ).promise;
 		
+		console.log( pdf.numPages );
+
+		// TODO: make this a proper typed array
+		// TODO: actually, it should be a proper tree structure
+		let titles = [];
+
+		for (let j = 1; j <= pdf.numPages; j++) {
+            const page = await pdf.getPage(j);
+            const textContent = await page.getTextContent();
+
+			for (let i = 0; i < textContent.items.length; i++) {
+                const item = textContent.items[i];
+				// TODO: map item height to heading depth more intelligently
+				if( item.height > 12 ) {
+					const o : OutlineItem = {
+						display : item.str,
+						height : item.height,
+						item: item,
+						pageNumber : Number(j) // copy it to avoid it being a reference to a changing value
+					}
+					titles.push( o );
+				}
+			}
+		}
+
+		return titles;
+		
+	}
+
+	anchorReferenceForDummyUri( dummyUri: string ) {
+		// example dummy uri: http://uk.co.prehensile.dummy/dummy#A%20divided%20world
+		return decodeURI( new URL( dummyUri ).hash );
+	}
+
+	pageNumberForAnchorReference( anchorRef: string, titles: any ){
+
+		//TODO: map anchor references to page numbers more intelligently
+
+		let path = anchorRef.split( "#" );
+		let leaf = path[ path.length-1 ];
+		
+		for( let i=0; i<titles.length; i++){
+			let o:OutlineItem = titles[i];
+			if( leaf == o.display ){
+				return o.pageNumber;
+			}
+		}
+		return -1;
+	}
+
+	async convertDummiesToAnchors( pdfPath:string ) {
+		
+		console.log( pdfPath );
 		// debugger;
+
+		let pdfFile = readFileSync( pdfPath );
+		let pdfBuffer = pdfFile.buffer;
+
+		let titles = await this.getOutlineForPdf( pdfBuffer.slice(0) );
+
 		const pdfDoc = await PDFDocument.load( pdfBuffer );
 		const pages = pdfDoc.getPages();
+
+		let dirty = false;
+
 		pages.forEach((p) => {
 			p.node
 			.Annots()
 			?.asArray()
-			.forEach((a) => {
-				const dict = pdfDoc.context.lookupMaybe(a, PDFDict);
-				const aRecord = dict?.get(asPDFName(`A`));
-				const link = pdfDoc.context.lookupMaybe(aRecord, PDFDict);
-				const uri = link?.get( asPDFName("URI") )?.toString();//.slice(1, -1); // get the original link, remove parenthesis
-				console.log( uri );
+			.forEach((annot) => {
+
+				const dctAnnot = pdfDoc.context.lookupMaybe( annot, PDFDict );
+
+				console.log( dctAnnot );
+				
+				const dctAction = dctAnnot?.get( asPDFName(`A`) );
+
+				const link = pdfDoc.context.lookupMaybe( dctAction, PDFDict );
+				
+				const uri = link?.get( asPDFName("URI") )?.toString().slice(1, -1); // get the original link, remove parenthesis
+				
+				let newAction = null;
+
+				if( uri?.startsWith(this._dummyBaseUrl) ){
+
+					let anchor = this.anchorReferenceForDummyUri( uri );
+					let pageNumber = this.pageNumberForAnchorReference( anchor, titles );
+					console.log( `Page number ${pageNumber} found for anchor ${anchor}` );
+					
+					// skip links we can't find a page number for
+					if( pageNumber < 1 ) return;
+
+					// link!.set(
+					// 	asPDFName("URI"),
+					// 	PDFString.of( /*Wathever value*/ )
+					// );
+
+					// construct page link
+					// using info from https://github.com/Hopding/pdf-lib/issues/123
+					
+					// TODO: link to the correct page, don't reset zoom.
+					// 	should be possible with XYZ, but I can't quite work it out
+					// 	reference: https://opensource.adobe.com/dc-acrobat-sdk-docs/library/pdfmark/pdfmark_Actions.html
+					newAction = pdfDoc.context.obj([
+						pages[pageNumber-1].ref,
+						'Fit'
+					]);
+
+					// newAction = pdfDoc.context.obj([
+					// 	pages[pageNumber-1].ref,
+					// 	'XYZ',
+					// 	null,
+					// 	0,
+					// 	null
+					// ]);
+
+					// link!.set(
+					// 	asPDFName( "Dest" ),
+					// 	pdfDoc.context.obj([
+					// 		pages[pageNumber].ref,
+					// 		'XYZ',
+					// 		null,
+					// 		null,
+					// 		null
+					// 	])
+						// PDFArray.fromArray(
+						// [
+						//   pages[pageNumber].ref,
+						//   asPDFName('XYZ'),
+						//   PDFNull.instance,
+						//   PDFNull.instance,
+						//   PDFNull.instance,
+						// ]
+					  //)
+
+					  // console.log( link );
+				}
+				
+				if( newAction != null ){
+					// remove 'A' dict from annotation and add a 'Dest'
+					dctAnnot?.delete( asPDFName(`A`) );
+					dctAnnot?.set(
+						asPDFName( "Dest" ),
+						newAction
+					)
+					dirty = true;
+				}
+
 				// if (uri.startsWith("http"))
 				// 	link!.set(asPDFName("URI"), PDFString.of( /*Wathever value*/ )); // update link value
 			});
 		});
+
+		if( dirty ) {
+			writeFileSync( pdfPath, await pdfDoc.save() );
+		}
 	}
 
 	async convertAllInternalLinksToDummiesCommand() {
@@ -169,7 +321,7 @@ export default class PdfAnchor extends Plugin {
 				console.log( link );
 
 				let anchor = encodeURI(link.link);
-				let dummyLink = `http://uk.co.prehensile.dummy/dummy${anchor}`;
+				let dummyLink = `${this._dummyBaseUrl}${anchor}`;
 				console.log( dummyLink );
 
 				let dummyMarkdown = `[${link.displayText}](${dummyLink})`;
