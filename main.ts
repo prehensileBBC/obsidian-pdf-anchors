@@ -1,17 +1,21 @@
 import { readFileSync, writeFileSync } from 'fs';
 import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, loadPdfJs } from 'obsidian';
 import { PDFDocument, PDFDict, asPDFName, PDFString, PDFPage, PDFPageTree, PDFArray, PDFNull } from 'pdf-lib'
+import { outlinePdfFactory } from '@lillallol/outline-pdf';
+import { outlinePdfDataStructure } from '@lillallol/outline-pdf-data-structure';
+
+import * as pdfLib from "pdf-lib";
+const outlinePdf = outlinePdfFactory(pdfLib);
 
 // Electron provides file paths
 interface ElectronFile extends File {
 	path: string
 }
 
-interface OutlineItem {
-	display : string,
+interface PdfBlockItem {
+	text : string,
 	pageNumber : number,
-	height : number,
-	item : any
+	height : number
 }
 
 // Remember to rename these classes and interfaces!
@@ -136,7 +140,8 @@ export default class PdfAnchor extends Plugin {
 		reader.readAsArrayBuffer( file );
 	}
 	
-	async getOutlineForPdf( pdfBuffer:ArrayBuffer ) {
+	/*
+	async getOutlineForPdfBuffer( pdfBuffer:ArrayBuffer ) {
 		const pdfjsLib = await loadPdfJs();
 		const pdf = await pdfjsLib.getDocument( pdfBuffer ).promise;
 		
@@ -154,7 +159,7 @@ export default class PdfAnchor extends Plugin {
                 const item = textContent.items[i];
 				// TODO: map item height to heading depth more intelligently
 				if( item.height > 12 ) {
-					const o : OutlineItem = {
+					const o : PdfBlockItem = {
 						display : item.str,
 						height : item.height,
 						item: item,
@@ -167,7 +172,101 @@ export default class PdfAnchor extends Plugin {
 
 		return titles;
 		
+	}*/
+
+	constructOutlineFromTitles( titles:any ){
+
 	}
+
+	async getpdfBlockItemsForPdfJsDocument( pdf:any ):Promise<[Array<PdfBlockItem>, Number, Number, Set<Number>]>{
+		
+		let pdfBlockItems = [];
+
+		let minHeight = Number.MAX_VALUE;
+		let maxHeight = 0; 
+		let heights:Set<Number> = new Set();
+
+		for (let j = 1; j <= pdf.numPages; j++) {
+			const page = await pdf.getPage(j);
+            const textContent = await page.getTextContent();
+			let textBuffer = "";
+			let prevItem = null;
+			for (let i = 0; i < textContent.items.length; i++) {
+				const item = textContent.items[i];
+
+				/*
+				if( prevItem == null ){
+					//noop
+				} else if( item.height == prevItem.height ){
+					// let's assume that this is text of the same lineheight running into a multiline block
+					textBuffer += item.str;
+				} else if( item.height != prevItem.height ){
+					// we've run across a line item with a different lineheight, assume we're running into a different block
+					// so commit the buffer & previous item
+					if( textBuffer.length > 1){
+						debugger;
+						const h = prevItem.height;
+						const o : PdfBlockItem = {
+							text : textBuffer,
+							height : h,
+							pageNumber : Number(j) // copy it to avoid it being a reference to a changing value
+						}
+						maxHeight = Math.max( maxHeight, h );
+						minHeight = Math.min( minHeight, h );
+						heights.add( h );
+						pdfBlockItems.push( o );
+					}
+					textBuffer = "";
+				}*/
+
+				const h = item.height;
+				const t = item.str;
+				if( t.length > 0  && h > 0 ){
+					const o : PdfBlockItem = {
+						text : t,
+						height : h,
+						pageNumber : Number(j) // copy it to avoid it being a reference to a changing value
+					}
+					maxHeight = Math.max( maxHeight, h );
+					minHeight = Math.min( minHeight, h );
+					heights.add( h );
+					pdfBlockItems.push( o );
+				}
+				prevItem = item;
+			}
+		}
+		return [pdfBlockItems,minHeight,maxHeight,heights];
+	}
+
+	async getOutlineForPdfBuffer( pdfBuffer:ArrayBuffer ):Promise<[any,string]> {
+		
+		const pdfjsLib = await loadPdfJs();
+		const pdf = await pdfjsLib.getDocument( pdfBuffer ).promise;
+	
+		let [pdfBlockItems,minHeight,maxHeight,heights] = await this.getpdfBlockItemsForPdfJsDocument( pdf );
+		var sortedHeights = Array.from( heights.values() ).sort((n1:number,n2:number) => n2 - n1);
+
+		// construct a string in the format that outline-pdf expects
+		let strOutline = "";
+		let numItems = 0;
+		let indentLevel = 0;
+		let previousHeadingDepth = 0;
+		for( let i=0; i<pdfBlockItems.length; i++ ){
+			const pdfBlockItem = pdfBlockItems[i];
+			const headingDepth = sortedHeights.indexOf( pdfBlockItem.height );
+			if( (headingDepth>=0) && (headingDepth < this.settings.maxHeadingDepth) ){
+				if( headingDepth > previousHeadingDepth ) indentLevel++;
+				else if( headingDepth < previousHeadingDepth ) indentLevel--;
+				indentLevel = Math.max( 0, indentLevel );
+				const indent = "-".repeat( indentLevel );
+				strOutline += `${pdfBlockItem.pageNumber}|${indent}|${pdfBlockItem.text}\n`;
+				previousHeadingDepth = headingDepth;
+			}
+		}
+		
+		return [outlinePdfDataStructure( strOutline, pdf.numPages ), strOutline];
+	}
+
 
 	anchorReferenceForDummyUri( dummyUri: string ) {
 		// example dummy uri: http://uk.co.prehensile.dummy/dummy#A%20divided%20world
@@ -182,11 +281,32 @@ export default class PdfAnchor extends Plugin {
 		let leaf = path[ path.length-1 ];
 		
 		for( let i=0; i<titles.length; i++){
-			let o:OutlineItem = titles[i];
-			if( leaf == o.display ){
+			let o:PdfBlockItem = titles[i];
+			if( leaf == o.text ){
 				return o.pageNumber;
 			}
 		}
+		return -1;
+	}
+
+	pageNumberForAnchorReferenceAndOutline( anchorRef: string, outline: any ){
+		let path = anchorRef.split( "#" );
+		let leaf = path[ path.length-1 ];
+
+		// console.log( outline );
+		// debugger;
+		
+		//TODO: map anchor references to outlineItems more intelligently
+		// 	e.g match the whole path, not just the leaf
+
+		for( let outlineItem of outline.outlineItems ){
+			if( leaf == outlineItem.Title ){
+				return outlineItem.Dest
+			}
+		}
+
+		// TODO: fallback to partial matches
+
 		return -1;
 	}
 
@@ -198,12 +318,13 @@ export default class PdfAnchor extends Plugin {
 		let pdfFile = readFileSync( pdfPath );
 		let pdfBuffer = pdfFile.buffer;
 
-		let titles = await this.getOutlineForPdf( pdfBuffer.slice(0) );
+		let [outline,strOutline] = await this.getOutlineForPdfBuffer( pdfBuffer.slice(0) );
+		// debugger;
 
 		const pdfDoc = await PDFDocument.load( pdfBuffer );
 		const pages = pdfDoc.getPages();
 
-		let dirty = false;
+		let rewriteCount = 0;
 
 		pages.forEach((p) => {
 			p.node
@@ -213,7 +334,7 @@ export default class PdfAnchor extends Plugin {
 
 				const dctAnnot = pdfDoc.context.lookupMaybe( annot, PDFDict );
 
-				console.log( dctAnnot );
+				//console.log( dctAnnot );
 				
 				const dctAction = dctAnnot?.get( asPDFName(`A`) );
 
@@ -226,7 +347,7 @@ export default class PdfAnchor extends Plugin {
 				if( uri?.startsWith(this._dummyBaseUrl) ){
 
 					let anchor = this.anchorReferenceForDummyUri( uri );
-					let pageNumber = this.pageNumberForAnchorReference( anchor, titles );
+					let pageNumber = this.pageNumberForAnchorReferenceAndOutline( anchor, outline );
 					console.log( `Page number ${pageNumber} found for anchor ${anchor}` );
 					
 					// skip links we can't find a page number for
@@ -244,7 +365,7 @@ export default class PdfAnchor extends Plugin {
 					// 	should be possible with XYZ, but I can't quite work it out
 					// 	reference: https://opensource.adobe.com/dc-acrobat-sdk-docs/library/pdfmark/pdfmark_Actions.html
 					newAction = pdfDoc.context.obj([
-						pages[pageNumber-1].ref,
+						pages[pageNumber].ref,
 						'Fit'
 					]);
 
@@ -285,7 +406,7 @@ export default class PdfAnchor extends Plugin {
 						asPDFName( "Dest" ),
 						newAction
 					)
-					dirty = true;
+					rewriteCount++;
 				}
 
 				// if (uri.startsWith("http"))
@@ -293,9 +414,15 @@ export default class PdfAnchor extends Plugin {
 			});
 		});
 
-		if( dirty ) {
-			writeFileSync( pdfPath, await pdfDoc.save() );
+		if( rewriteCount > 0 ) {
+			// writeFileSync( pdfPath, await pdfDoc.save() );
+			
+			// get a copy of the pdf document containing an outline
+			const outlinedPdf = await outlinePdf({ outline:strOutline, pdf:pdfDoc }).then((pdfDocument) => pdfDocument.save());
+        	writeFileSync( pdfPath, outlinedPdf );
 		}
+
+		new Notice( `Rewrote ${rewriteCount} links in file ${pdfPath}` );
 	}
 
 	async convertAllInternalLinksToDummiesCommand() {

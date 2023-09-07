@@ -22,6 +22,8 @@
 		"typescript": "4.7.4"
 	},
 	"dependencies": {
+		"@lillallol/outline-pdf": "^4.0.0",
+		"@lillallol/outline-pdf-data-structure": "^1.0.3",
 		"pdf-lib": "^1.17.1"
 	}
 }
