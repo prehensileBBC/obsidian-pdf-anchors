@@ -1,11 +1,15 @@
 import { readFileSync, writeFileSync } from 'fs';
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, loadPdfJs } from 'obsidian';
-import { PDFDocument, PDFDict, asPDFName, PDFString, PDFPage, PDFPageTree, PDFArray, PDFNull } from 'pdf-lib'
+import { App, MarkdownFileInfo, Modal, Notice, Plugin, TFile, loadPdfJs,ButtonComponent } from 'obsidian';
+import { PDFDocument, PDFDict, asPDFName } from 'pdf-lib'
 import { outlinePdfFactory } from '@lillallol/outline-pdf';
 import { outlinePdfDataStructure } from '@lillallol/outline-pdf-data-structure';
 
+import { PdfAnchorSettings, PdfAnchorSettingTab, DEFAULT_SETTINGS } from 'settings'
+import { PdfSelectModal } from 'ui';
+
 import * as pdfLib from "pdf-lib";
 const outlinePdf = outlinePdfFactory(pdfLib);
+
 
 // Electron provides file paths
 interface ElectronFile extends File {
@@ -18,72 +22,40 @@ interface PdfBlockItem {
 	height : number
 }
 
-// Remember to rename these classes and interfaces!
-
-interface PdfAnchorSettings {
-	mySetting: string;
-	maxHeadingDepth: number 
+interface PrintableEditor extends MarkdownFileInfo {
+	printToPdf: Function
 }
 
-const DEFAULT_SETTINGS: PdfAnchorSettings = {
-	mySetting: 'default',
-	maxHeadingDepth: 3
-}
 
 export default class PdfAnchor extends Plugin {
 	
 	settings: PdfAnchorSettings;
 
-	readonly _dummyBaseUrl = "http://dummy.link/dummy";
+	readonly _dummyBaseUrl = "http://rup9bd4xbbq2gbymg9wkasn12npykq.dummy.link/dummy";
 
 	async onload() {
 		await this.loadSettings();
+
+		this.addCommand({
+			id: 'full-export',
+			name: 'Export to PDF and fix header links',
+			callback: () => this.fullExportCommand()
+		});
 		
-		this.addCommand({
-			id: 'convert-internal-links-to-dummies',
-			name: 'Convert all internal links to dummies',
-			callback: () => this.convertAllInternalLinksToDummiesCommand()
-		});
+		if( this.settings.advancedMode ){
+			this.addCommand({
+				id: 'convert-internal-links-to-dummies',
+				name: 'Convert header links inside this note to dummies',
+				callback: () => this.convertAllInternalLinksToDummiesCommand()
+			});
+			this.addCommand({
+				id: 'convert-dummies-to-anchors',
+				name: 'Convert dummy links back to header links in an exported PDF',
+				callback: () => this.convertDummiesToAnchorsCommand()
+			});
+		}
 
-		this.addCommand({
-			id: 'convert-dummies-to-anchors',
-			name: 'Convert dummies to anchors',
-			callback: () => this.convertDummiesToAnchorsCommand()
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		/*
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		this.registerDomEvent(window, 'beforeprint', (evt: Event) => {
-			console.log('beforeprint', evt);
-			console.log( JSON.stringify(evt) );
-		});
-
-		this.registerDomEvent(window, 'afterprint', (evt: Event) => {
-			console.log('afterprint', evt);
-			console.log( JSON.stringify(evt) );
-		});
-
-		var t = window.require("electron").ipcRenderer;
-		t.on( "print-to-pdf", (evt:Event,b:any) => {
-			// debugger;
-			console.log( b );
-			console.log('print-to-pdf', evt);
-			console.log( evt );
-			console.log( JSON.stringify(evt) );
-			//console.log( evt.emitter.send("print-to-pdf", {}) )
-		})
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-		*/
+		this.addSettingTab(new PdfAnchorSettingTab(this.app, this));
 	}
 
 	onunload() {
@@ -98,26 +70,14 @@ export default class PdfAnchor extends Plugin {
 		await this.saveData(this.settings);
 	}
 
+
+	/*
+	 * UTILITY FUNCTIONS
+	 */
+
 	async reportError( message:string ){
 		console.log( message );
 		new Notice( message );
-	}
-
-	async openFileDialog( cb:Function ) {
-		// see https://forum.obsidian.md/t/file-open-dialog/47325
-		let input = document.createElement('input');
-		input.type = 'file';
-		input.onchange = _ => {
-			cb( input.files );
-		};
-		input.click();
-	}
-
-	async convertDummiesToAnchorsCommand() {
-		this.openFileDialog( (files:FileList) => {
-			this.convertDummiesToAnchors(
-				(files[0] as ElectronFile).path );
-		});
 	}
 
 	async getContentsOfFile( file:File, cb:Function ) {
@@ -130,7 +90,7 @@ export default class PdfAnchor extends Plugin {
 			fileResult = reader.result
 			cb( fileResult );
 		}
-		
+		// TODO: error handling :D
 		// reader.onerror = (error) => {
 		// 	reject(error)
 		// }
@@ -139,43 +99,105 @@ export default class PdfAnchor extends Plugin {
 		// }
 		reader.readAsArrayBuffer( file );
 	}
-	
-	/*
-	async getOutlineForPdfBuffer( pdfBuffer:ArrayBuffer ) {
-		const pdfjsLib = await loadPdfJs();
-		const pdf = await pdfjsLib.getDocument( pdfBuffer ).promise;
+
+	async openFileDialog( cb:Function ) {
+		// see https://forum.obsidian.md/t/file-open-dialog/47325
+		let input = document.createElement('input');
+		input.type = 'file';
+		input.onchange = _ => {
+			cb( input.files );
+			input.remove();
+		};
+		input.click();
+	}
+
+
+	/* 
+	 * FULL EXPORT
+	 */
+
+	async fullExportCommand(){
+
+		const currentFile = this.app.workspace.getActiveFile();
+		if( !currentFile ) this.reportError( "Couldn't get active file" );
+
+		// keep a copy of note text pre-transform
+		const noteTextOriginal:string = await this.app.vault.read( currentFile! );
+
+		await this.convertAllInternalLinksToDummies( currentFile! );
+
+		this.registerDomEvent(window, 'afterprint', (evt: Event) => {
+			this.onPDFSaveComplete( currentFile!, noteTextOriginal );
+		},{
+			once: true
+		});
+
+		(this.app.workspace.activeEditor! as PrintableEditor).printToPdf();
+	}
+
+	onPDFSaveComplete( originalNoteFile:TFile, originalNoteText: string ){
+
+		// PDF has been saved, so we can revert note file back to its contents pre-transformation
+		// write noteText back to original file
+		this.app.vault.modify( originalNoteFile, originalNoteText );
+
+		new PdfSelectModal(
+			this.app,
+			this.manifest.name,
+			() => {
+				this.convertDummiesToAnchorsCommand();
+			}
+		).open();
+	}
+
+
+	/* 
+	 * Convert header / anchor links in the same document to dummy links
+	 */
+
+	async convertAllInternalLinksToDummiesCommand() {
+		const currentFile = this.app.workspace.getActiveFile();
+		if( !currentFile ) this.reportError( "Couldn't get active file" );
+		this.convertAllInternalLinksToDummies( currentFile! );
+	}
+
+	async convertAllInternalLinksToDummies( noteFile : TFile ) {
 		
-		console.log( pdf.numPages );
+		/* based heavliy on https://github.com/dy-sh/obsidian-consistent-attachments-and-links */
 
-		// TODO: make this a proper typed array
-		// TODO: actually, it should be a proper tree structure
-		let titles = [];
+		const links = this.app.metadataCache.getCache( noteFile.path )?.links;
+		let noteText = await this.app.vault.read( noteFile );
+		
+		if (links) {
+			for (let link of links) {
 
-		for (let j = 1; j <= pdf.numPages; j++) {
-            const page = await pdf.getPage(j);
-            const textContent = await page.getTextContent();
+				// we're only interested in links to headings in the current note 
+				if( !link.original.startsWith("[[#") )
+					continue
 
-			for (let i = 0; i < textContent.items.length; i++) {
-                const item = textContent.items[i];
-				// TODO: map item height to heading depth more intelligently
-				if( item.height > 12 ) {
-					const o : PdfBlockItem = {
-						display : item.str,
-						height : item.height,
-						item: item,
-						pageNumber : Number(j) // copy it to avoid it being a reference to a changing value
-					}
-					titles.push( o );
-				}
+				let anchor = encodeURI(link.link);
+				let dummyLink = `${this._dummyBaseUrl}${anchor}`;
+				let dummyMarkdown = `[${link.displayText}](${dummyLink})`;
+
+				// rewrite link to an external dummy link
+				noteText = noteText.replace( link.original, dummyMarkdown );
 			}
 		}
 
-		return titles;
-		
-	}*/
+		// write noteText back to original file
+		await this.app.vault.modify( noteFile, noteText );
+	}
 
-	constructOutlineFromTitles( titles:any ){
 
+	/* 
+	 * Convert dummy links in a PDF back to header / anchor links in the same document
+	 */
+
+	async convertDummiesToAnchorsCommand() {
+		this.openFileDialog( (files:FileList) => {
+			this.convertDummiesToAnchors(
+				(files[0] as ElectronFile).path )
+		});
 	}
 
 	async getpdfBlockItemsForPdfJsDocument( pdf:any ):Promise<[Array<PdfBlockItem>, Number, Number, Set<Number>]>{
@@ -194,6 +216,7 @@ export default class PdfAnchor extends Plugin {
 			for (let i = 0; i < textContent.items.length; i++) {
 				const item = textContent.items[i];
 
+				// this commented block was an attempt at catching headers that run on to >1 line
 				/*
 				if( prevItem == null ){
 					//noop
@@ -238,6 +261,8 @@ export default class PdfAnchor extends Plugin {
 		return [pdfBlockItems,minHeight,maxHeight,heights];
 	}
 
+	readonly _maxHeadingDepthForOutline = 4
+
 	async getOutlineForPdfBuffer( pdfBuffer:ArrayBuffer ):Promise<[any,string]> {
 		
 		const pdfjsLib = await loadPdfJs();
@@ -254,7 +279,7 @@ export default class PdfAnchor extends Plugin {
 		for( let i=0; i<pdfBlockItems.length; i++ ){
 			const pdfBlockItem = pdfBlockItems[i];
 			const headingDepth = sortedHeights.indexOf( pdfBlockItem.height );
-			if( (headingDepth>=0) && (headingDepth < this.settings.maxHeadingDepth) ){
+			if( (headingDepth>=0) && (headingDepth < this._maxHeadingDepthForOutline) ){
 				if( headingDepth > previousHeadingDepth ) indentLevel++;
 				else if( headingDepth < previousHeadingDepth ) indentLevel--;
 				indentLevel = Math.max( 0, indentLevel );
@@ -269,57 +294,46 @@ export default class PdfAnchor extends Plugin {
 
 
 	anchorReferenceForDummyUri( dummyUri: string ) {
-		// example dummy uri: http://uk.co.prehensile.dummy/dummy#A%20divided%20world
+		// example dummy uri: http://dummy.link/dummy#A%20divided%20world
 		return decodeURI( new URL( dummyUri ).hash );
 	}
 
-	pageNumberForAnchorReference( anchorRef: string, titles: any ){
-
-		//TODO: map anchor references to page numbers more intelligently
-
-		let path = anchorRef.split( "#" );
-		let leaf = path[ path.length-1 ];
-		
-		for( let i=0; i<titles.length; i++){
-			let o:PdfBlockItem = titles[i];
-			if( leaf == o.text ){
-				return o.pageNumber;
-			}
-		}
-		return -1;
+	normalise( str:string ) {
+		// sometimes non-alphas in dummy links get munged along the way
+		return str.toLowerCase().replace( /[^a-z]/g, "" );
 	}
 
 	pageNumberForAnchorReferenceAndOutline( anchorRef: string, outline: any ){
 		let path = anchorRef.split( "#" );
-		let leaf = path[ path.length-1 ];
+		let leaf = this.normalise( path[ path.length-1 ] );
 
-		// console.log( outline );
-		// debugger;
-		
 		//TODO: map anchor references to outlineItems more intelligently
 		// 	e.g match the whole path, not just the leaf
 
 		for( let outlineItem of outline.outlineItems ){
-			if( leaf == outlineItem.Title ){
+			if( leaf == this.normalise(outlineItem.Title) ){
 				return outlineItem.Dest
 			}
 		}
 
-		// TODO: fallback to partial matches
+		// fallback to partial matches, but only if we haven't had a full match
+		for( let outlineItem of outline.outlineItems ){
+			if( leaf.indexOf( this.normalise(outlineItem.Title) ) > 0 ){
+				return outlineItem.Dest
+			}
+		}
 
+
+		debugger;
 		return -1;
 	}
 
 	async convertDummiesToAnchors( pdfPath:string ) {
 		
-		console.log( pdfPath );
-		// debugger;
-
 		let pdfFile = readFileSync( pdfPath );
 		let pdfBuffer = pdfFile.buffer;
 
 		let [outline,strOutline] = await this.getOutlineForPdfBuffer( pdfBuffer.slice(0) );
-		// debugger;
 
 		const pdfDoc = await PDFDocument.load( pdfBuffer );
 		const pages = pdfDoc.getPages();
@@ -333,13 +347,8 @@ export default class PdfAnchor extends Plugin {
 			.forEach((annot) => {
 
 				const dctAnnot = pdfDoc.context.lookupMaybe( annot, PDFDict );
-
-				//console.log( dctAnnot );
-				
 				const dctAction = dctAnnot?.get( asPDFName(`A`) );
-
 				const link = pdfDoc.context.lookupMaybe( dctAction, PDFDict );
-				
 				const uri = link?.get( asPDFName("URI") )?.toString().slice(1, -1); // get the original link, remove parenthesis
 				
 				let newAction = null;
@@ -348,15 +357,10 @@ export default class PdfAnchor extends Plugin {
 
 					let anchor = this.anchorReferenceForDummyUri( uri );
 					let pageNumber = this.pageNumberForAnchorReferenceAndOutline( anchor, outline );
-					console.log( `Page number ${pageNumber} found for anchor ${anchor}` );
+					// console.log( `Page number ${pageNumber} found for anchor ${anchor}` );
 					
 					// skip links we can't find a page number for
 					if( pageNumber < 1 ) return;
-
-					// link!.set(
-					// 	asPDFName("URI"),
-					// 	PDFString.of( /*Wathever value*/ )
-					// );
 
 					// construct page link
 					// using info from https://github.com/Hopding/pdf-lib/issues/123
@@ -369,34 +373,6 @@ export default class PdfAnchor extends Plugin {
 						'Fit'
 					]);
 
-					// newAction = pdfDoc.context.obj([
-					// 	pages[pageNumber-1].ref,
-					// 	'XYZ',
-					// 	null,
-					// 	0,
-					// 	null
-					// ]);
-
-					// link!.set(
-					// 	asPDFName( "Dest" ),
-					// 	pdfDoc.context.obj([
-					// 		pages[pageNumber].ref,
-					// 		'XYZ',
-					// 		null,
-					// 		null,
-					// 		null
-					// 	])
-						// PDFArray.fromArray(
-						// [
-						//   pages[pageNumber].ref,
-						//   asPDFName('XYZ'),
-						//   PDFNull.instance,
-						//   PDFNull.instance,
-						//   PDFNull.instance,
-						// ]
-					  //)
-
-					  // console.log( link );
 				}
 				
 				if( newAction != null ){
@@ -408,84 +384,25 @@ export default class PdfAnchor extends Plugin {
 					)
 					rewriteCount++;
 				}
-
-				// if (uri.startsWith("http"))
-				// 	link!.set(asPDFName("URI"), PDFString.of( /*Wathever value*/ )); // update link value
 			});
 		});
 
 		if( rewriteCount > 0 ) {
-			// writeFileSync( pdfPath, await pdfDoc.save() );
-			
-			// get a copy of the pdf document containing an outline
-			const outlinedPdf = await outlinePdf({ outline:strOutline, pdf:pdfDoc }).then((pdfDocument) => pdfDocument.save());
-        	writeFileSync( pdfPath, outlinedPdf );
-		}
-
-		new Notice( `Rewrote ${rewriteCount} links in file ${pdfPath}` );
-	}
-
-	async convertAllInternalLinksToDummiesCommand() {
-		const currentFile = this.app.workspace.getActiveFile();
-		if( !currentFile ) this.reportError( "Couldn't get active file" );
-		this.convertAllInternalLinksToDummies( currentFile! );
-	}
-
-	async convertAllInternalLinksToDummies( noteFile : TFile ) {
-		
-		/* based heavliy on https://github.com/dy-sh/obsidian-consistent-attachments-and-links */
-
-		const links = this.app.metadataCache.getCache( noteFile.path )?.links;
-		let noteText = await this.app.vault.read( noteFile );
-		
-		if (links) {
-			for (let link of links) {
-
-				// we're only interested in links to headings in the current note 
-				if( !link.original.startsWith("[[#") )
-					continue
-
-				console.log( link );
-
-				let anchor = encodeURI(link.link);
-				let dummyLink = `${this._dummyBaseUrl}${anchor}`;
-				console.log( dummyLink );
-
-				let dummyMarkdown = `[${link.displayText}](${dummyLink})`;
-
-				// rewrite link to an external dummy link
-				noteText = noteText.replace( link.original, dummyMarkdown );
+			if( this.settings.generateOutline ){
+				// get a copy of the pdf document containing an outline
+				// TODO: cull the outline according to this.settings.maxHeadlineDepth
+				// 	but only for generating the display outline
+				const outlinedPdf = await outlinePdf({ outline:strOutline, pdf:pdfDoc })
+					.then((pdfDocument) => pdfDocument.save());
+				writeFileSync( pdfPath, outlinedPdf );
+			} else {
+				writeFileSync( pdfPath, await pdfDoc.save() );
 			}
+			new Notice( `Rewrote ${rewriteCount} links in file ${pdfPath}` );
+		} else {
+			this.reportError(
+				`Couldn't find any dummy links to rewrite in PDF file ${pdfPath}. This probably means something went wrong :(`
+			)
 		}
-
-		// write noteText back to original file
-		await this.app.vault.modify( noteFile, noteText );
-	}
-}
-
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: PdfAnchor;
-
-	constructor(app: App, plugin: PdfAnchor) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
-
-	display(): void {
-		const {containerEl} = this;
-
-		containerEl.empty();
-
-		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
 	}
 }
