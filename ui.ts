@@ -53,7 +53,7 @@ export class PdfSelectModal extends Modal {
 		contentEl.empty();
 
 		contentEl.createEl("div", { text: this._windowTitle }).addClass( "modal-title" );
-		contentEl.createEl("div", { text: "Now, please select the exported PDF" });
+		contentEl.createEl("div", { text: "Now, please select the exported PDF." });
 
 		this.createButtonBar(
 			contentEl.createDiv()
@@ -75,4 +75,29 @@ export class PdfSelectModal extends Modal {
 	  let { contentEl } = this;
 	  contentEl.empty();
 	}
+}
+
+export class PdfProcessingModal extends Modal {
+	
+	private _windowTitle:string;
+    private _progressText:string;
+    private _messageEl:any;
+	
+	constructor( app: App, windowTitle:string ) {
+	  super(app);
+      this._windowTitle = windowTitle;
+	}
+
+	onOpen(): void {
+		
+		const { contentEl } = this;
+		contentEl.empty();
+
+		contentEl.createEl("div", { text: this._windowTitle }).addClass( "modal-title" );
+		this._messageEl = contentEl.createEl("p", { text: "Fixing heading links in PDF..." });
+		const barContainer = contentEl.createEl("div")
+        barContainer.addClass("pdf-anchors-bar-container");
+        barContainer.createEl("div").addClass("pdf-anchors-bar-fill");
+	}
+
 }

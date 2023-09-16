@@ -5,7 +5,7 @@ import { outlinePdfFactory } from '@lillallol/outline-pdf';
 import { outlinePdfDataStructure } from '@lillallol/outline-pdf-data-structure';
 
 import { PdfAnchorSettings, PdfAnchorSettingTab, DEFAULT_SETTINGS } from 'settings'
-import { PdfSelectModal } from 'ui';
+import { PdfProcessingModal, PdfSelectModal } from 'ui';
 
 import * as pdfLib from "pdf-lib";
 const outlinePdf = outlinePdfFactory(pdfLib);
@@ -330,6 +330,12 @@ export default class PdfAnchor extends Plugin {
 
 	async convertDummiesToAnchors( pdfPath:string ) {
 		
+		const modalProcessing = new PdfProcessingModal(
+			this.app,
+			this.manifest.name
+		);
+		modalProcessing.open();
+
 		let pdfFile = readFileSync( pdfPath );
 		let pdfBuffer = pdfFile.buffer;
 
@@ -404,5 +410,7 @@ export default class PdfAnchor extends Plugin {
 				`Couldn't find any dummy links to rewrite in PDF file ${pdfPath}. This probably means something went wrong :(`
 			)
 		}
+
+		modalProcessing.close();
 	}
 }

@@ -1,0 +1,30 @@
+/* Sets all the text color to red! */
+.pdf-anchors-bar-container {
+    width: 100%;
+    display: block;
+    height: 8px;
+    overflow: hidden;
+    background-color: hsla(var(--interactive-accent-hsl), 0.3);
+}
+
+.pdf-anchors-bar-fill {
+    width: 100%;
+    display: block;
+    position: relative;
+    height: 100%;
+    background-color: var(--interactive-accent);
+    animation-duration: 1s;
+    animation-name: fillanim;
+    animation-timing-function: ease-out;
+    animation-iteration-count: infinite;
+}
+
+@keyframes fillanim {
+    from {
+      margin-left: -100%;
+    }
+  
+    to {
+      margin-left: 100%;
+    }
+  }
