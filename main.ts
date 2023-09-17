@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from 'fs';
 import { App, MarkdownFileInfo, Modal, Notice, Plugin, TFile, loadPdfJs,ButtonComponent } from 'obsidian';
-import { PDFDocument, PDFDict, asPDFName } from 'pdf-lib'
+import { PDFDocument, PDFDict, PDFPage, asPDFName } from 'pdf-lib'
 import { outlinePdfFactory } from '@lillallol/outline-pdf';
 import { outlinePdfDataStructure } from '@lillallol/outline-pdf-data-structure';
 
@@ -32,6 +32,7 @@ export default class PdfAnchor extends Plugin {
 	settings: PdfAnchorSettings;
 
 	readonly _dummyBaseUrl = "http://rup9bd4xbbq2gbymg9wkasn12npykq.dummy.link/dummy";
+	private _currentModal:Modal;
 
 	async onload() {
 		await this.loadSettings();
@@ -141,13 +142,14 @@ export default class PdfAnchor extends Plugin {
 		// write noteText back to original file
 		this.app.vault.modify( originalNoteFile, originalNoteText );
 
-		new PdfSelectModal(
+		this._currentModal = new PdfSelectModal(
 			this.app,
 			this.manifest.name,
 			() => {
 				this.convertDummiesToAnchorsCommand();
 			}
-		).open();
+		)
+		this._currentModal.open();
 	}
 
 
@@ -162,7 +164,9 @@ export default class PdfAnchor extends Plugin {
 	}
 
 	async convertAllInternalLinksToDummies( noteFile : TFile ) {
-		
+
+		//TODO: save altered note text to a new note file, don't overwrite existing one
+
 		/* based heavliy on https://github.com/dy-sh/obsidian-consistent-attachments-and-links */
 
 		const links = this.app.metadataCache.getCache( noteFile.path )?.links;
@@ -194,6 +198,9 @@ export default class PdfAnchor extends Plugin {
 	 */
 
 	async convertDummiesToAnchorsCommand() {
+		if( this._currentModal ){
+			this._currentModal.close();
+		}
 		this.openFileDialog( (files:FileList) => {
 			this.convertDummiesToAnchors(
 				(files[0] as ElectronFile).path )
@@ -322,9 +329,6 @@ export default class PdfAnchor extends Plugin {
 				return outlineItem.Dest
 			}
 		}
-
-
-		debugger;
 		return -1;
 	}
 
@@ -345,8 +349,11 @@ export default class PdfAnchor extends Plugin {
 		const pages = pdfDoc.getPages();
 
 		let rewriteCount = 0;
+		let numPage = 0;
 
-		pages.forEach((p) => {
+		pages.forEach((p:PDFPage
+			) => {
+			numPage++;
 			p.node
 			.Annots()
 			?.asArray()
@@ -393,24 +400,53 @@ export default class PdfAnchor extends Plugin {
 			});
 		});
 
+		let message = "";
+
 		if( rewriteCount > 0 ) {
+
+			message = `✅Complete! Restored ${rewriteCount} anchor links in file ${pdfPath}`;
+
 			if( this.settings.generateOutline ){
 				// get a copy of the pdf document containing an outline
 				// TODO: cull the outline according to this.settings.maxHeadlineDepth
 				// 	but only for generating the display outline
-				const outlinedPdf = await outlinePdf({ outline:strOutline, pdf:pdfDoc })
-					.then((pdfDocument) => pdfDocument.save());
-				writeFileSync( pdfPath, outlinedPdf );
+				
+				try {
+					const outlinedPdf = await outlinePdf({ outline:strOutline, pdf:pdfDoc })
+						.then((pdfDocument) => pdfDocument.save())
+					writeFileSync( pdfPath, outlinedPdf );
+					
+				} catch (error) {
+
+					message = `⚠ ${error}`;
+				}
+
 			} else {
 				writeFileSync( pdfPath, await pdfDoc.save() );
 			}
-			new Notice( `Rewrote ${rewriteCount} links in file ${pdfPath}` );
+			
 		} else {
-			this.reportError(
-				`Couldn't find any dummy links to rewrite in PDF file ${pdfPath}. This probably means something went wrong :(`
-			)
+			message = `⚠ Couldn't find any anchor links to restore in PDF file ${pdfPath}. This probably means something went wrong :(`
 		}
 
-		modalProcessing.close();
+		console.log( message );
+
+		if( modalProcessing.isOpen() ){
+
+			modalProcessing.setCloseButtonEnabled( true );
+			modalProcessing.setProcessingComplete( true, message );
+
+		} else {
+			// if the user's already closed the modal, show a Notice instead
+			new Notice( message );
+		}
+	}
+
+	onSaveComplete(){
+
+	}
+
+	onSaveFailed(reason:any){
+
 	}
 }

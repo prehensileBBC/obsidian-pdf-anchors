@@ -1,0 +1,8 @@
+{
+    "PDFFixing" : "Restoring anchor links in exported PDF...",
+    "PDFFixingComplete" : "Anchor links restored.",
+    "PDFFixingClose" : "Done", 
+    "SelectPDF" : "Next, please select the exported PDF...",
+    "SelectPDFOkay" : "Select",
+    "SelectPDFCancel" : "Cancel"
+}
