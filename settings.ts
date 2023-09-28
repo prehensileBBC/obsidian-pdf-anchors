@@ -33,6 +33,8 @@ export class PdfAnchorSettingTab extends PluginSettingTab {
 
 		containerEl.empty();
 
+		containerEl.createEl('h2', {text: 'General settings'});
+
 		new Setting(containerEl)
 			.setName( 'Generate document outline' )
 			.setDesc( 'Generates an outline view while post-processing a saved PDF file' )
@@ -41,22 +43,8 @@ export class PdfAnchorSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.generateOutline = value;
 					await this.plugin.saveSettings();
-				}
-			)
-		);
-
-		new Setting(containerEl)
-			.setName( 'Advanced mode' )
-			.setDesc( 'Enables commands for subsections of the export and conversion process' )
-			.addToggle( val => val
-				.setValue( this.plugin.settings.advancedMode )
-				.onChange(async (value) => {
-					this.plugin.settings.advancedMode = value;
-					await this.plugin.saveSettings();
-					//this.reloadPlugin();
-				}
-			)
-		);
+				})
+			);
 
 		new Setting(containerEl)
 			.setName( 'Maximum header depth' )
@@ -68,8 +56,20 @@ export class PdfAnchorSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.maxHeadingDepth = value;
 					await this.plugin.saveSettings();
-				}
-			)
-		);
+				})
+			);
+
+		new Setting(containerEl)
+			.setName( 'Advanced mode' )
+			.setDesc( 'Enables commands for subsections of the export and conversion process' )
+			.addToggle( val => val
+				.setValue( this.plugin.settings.advancedMode )
+				.onChange(async (value) => {
+					this.plugin.settings.advancedMode = value;
+					await this.plugin.saveSettings();
+					//this.reloadPlugin();
+				})
+			);
+		
 	}
 }
