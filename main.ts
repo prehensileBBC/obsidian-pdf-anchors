@@ -332,8 +332,14 @@ export default class PdfAnchor extends Plugin {
 		return -1;
 	}
 
-	async convertDummiesToAnchors( pdfPath:string ) {
+	async convertDummiesToAnchors( pdfPath:string, notePath?:string ) {
 		
+		if( !notePath ) notePath =  this.app.workspace.getActiveFile()!.path;
+		const cachedHeadings = this.app.metadataCache.getCache( notePath )?.headings;
+		
+		// TODO: use cachedHeadings to reconstruct headers which have broken across lines in the PDF 
+		console.log( cachedHeadings );
+
 		const modalProcessing = new PdfProcessingModal(
 			this.app,
 			this.manifest.name
@@ -389,7 +395,7 @@ export default class PdfAnchor extends Plugin {
 				}
 				
 				if( newAction != null ){
-					// remove 'A' dict from annotation and add a 'Dest'
+					// remove 'A' dict from annotation (a URL) and add a 'Dest' (page destination in PDF)
 					dctAnnot?.delete( asPDFName(`A`) );
 					dctAnnot?.set(
 						asPDFName( "Dest" ),
@@ -404,7 +410,7 @@ export default class PdfAnchor extends Plugin {
 
 		if( rewriteCount > 0 ) {
 
-			message = `✅Complete! Restored ${rewriteCount} anchor links in file ${pdfPath}`;
+			message = `✅ Complete! Restored ${rewriteCount} anchor links in file ${pdfPath}`;
 
 			if( this.settings.generateOutline ){
 				// get a copy of the pdf document containing an outline
