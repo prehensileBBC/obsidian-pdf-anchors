@@ -1,4 +1,10 @@
 {
+    "_comment_main" : "---- main.ts strings from here down ----",
+    "DummyBaseURL": "http://rup9bd4xbbq2gbymg9wkasn12npykq.dummy.link/dummy",
+    "CommandPDFExport" : "Export to PDF with header links",
+    "CommandAdvancedToDummies" : "Convert header links within this note to dummies",
+    "CommandAdvancedFromDummies" : "Convert dummy links back to header links in an exported PDF",
+    "_comment_ui" : "---- ui.ts strings from here down ----",
     "PDFFixing" : "Restoring anchor links in exported PDF...",
     "PDFFixingComplete" : "Anchor links restored.",
     "PDFFixingClose" : "Done", 

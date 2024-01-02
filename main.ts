@@ -7,6 +7,8 @@ import { outlinePdfDataStructure } from '@lillallol/outline-pdf-data-structure';
 import { PdfAnchorSettings, PdfAnchorSettingTab, DEFAULT_SETTINGS } from 'settings'
 import { PdfProcessingModal, PdfSelectModal } from 'ui';
 
+import * as strings from 'strings.json';
+
 import * as pdfLib from "pdf-lib";
 const outlinePdf = outlinePdfFactory(pdfLib);
 
@@ -31,7 +33,7 @@ export default class PdfAnchor extends Plugin {
 	
 	settings: PdfAnchorSettings;
 
-	readonly _dummyBaseUrl = "http://rup9bd4xbbq2gbymg9wkasn12npykq.dummy.link/dummy";
+	readonly _dummyBaseUrl = strings.DummyBaseURL;
 	private _currentModal:Modal;
 
 	async onload() {
@@ -39,19 +41,19 @@ export default class PdfAnchor extends Plugin {
 
 		this.addCommand({
 			id: 'full-export',
-			name: 'Export to PDF and fix header links',
+			name: strings.CommandPDFExport,
 			callback: () => this.fullExportCommand()
 		});
 		
 		if( this.settings.advancedMode ){
 			this.addCommand({
 				id: 'convert-internal-links-to-dummies',
-				name: 'Convert header links inside this note to dummies',
+				name: strings.CommandAdvancedToDummies,
 				callback: () => this.convertAllInternalLinksToDummiesCommand()
 			});
 			this.addCommand({
 				id: 'convert-dummies-to-anchors',
-				name: 'Convert dummy links back to header links in an exported PDF',
+				name: strings.CommandAdvancedFromDummies,
 				callback: () => this.convertDummiesToAnchorsCommand()
 			});
 		}
@@ -338,7 +340,7 @@ export default class PdfAnchor extends Plugin {
 		const cachedHeadings = this.app.metadataCache.getCache( notePath )?.headings;
 		
 		// TODO: use cachedHeadings to reconstruct headers which have broken across lines in the PDF 
-		console.log( cachedHeadings );
+		// console.log( cachedHeadings );
 
 		const modalProcessing = new PdfProcessingModal(
 			this.app,

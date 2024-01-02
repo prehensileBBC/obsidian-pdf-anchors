@@ -37,7 +37,7 @@ export class PdfAnchorSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName( 'Generate document outline' )
-			.setDesc( 'Generates an outline view while post-processing a saved PDF file' )
+			.setDesc( 'Generates an outline view while processing a PDF file' )
 			.addToggle( val => val
 				.setValue( this.plugin.settings.generateOutline )
 				.onChange(async (value) => {
@@ -67,7 +67,6 @@ export class PdfAnchorSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.advancedMode = value;
 					await this.plugin.saveSettings();
-					//this.reloadPlugin();
 				})
 			);
 		
