@@ -13,9 +13,9 @@ Optionally, this plugin can also generate an _outline view_, sometimes called _b
 Once installed, you can use the "PDF Anchors: Export to PDF with header links" in Obsidian's command palette or file menu. It will export a PDF using Obsidian's usual export process, and then ask to open the PDF you just exported. Once this is opened, it will fix header links in the exported PDF.
 
 ## Known bugs
-- Headings which wrap onto more than one line in the PDF may not be picked up while generating an outline view
+- Headings which wrap onto more than one line in the PDF may not be picked up while generating an outline view.
 
-## Details for nerds
+## Developer notes
 This plugin is a workaround for the minimal PDF export Obsidian provides by default. It's made possible by a quirk I observed in Obsidian's PDF export process: external links (e.g to http:// and https:// URLs) survive the export process, but anchor links (to headings in the same document) don't. 
 
 This is the export process used by the plugin:
@@ -26,5 +26,7 @@ This is the export process used by the plugin:
 5. delete the temporary note file
 
 It's a pretty hacky workaround in other words; more brittle than I'd like and likely to break if anything changes in the way Obsidian's PDF export process works. Ideally, I'd like to see this plugin be made obsolete by equivalent features being implemented in Obsdian itself - until then, this hacky plugin will have to do :D 
+
+### Pull requests welcome
 
 Also: I'll be honest with you: javascript / typescript is not my favourite programming language, especially when it comes to async stuff. There are places in the code where I basically just threw async / await around until it worked, and I've also liberally used ! where optional properties most probably exist, just to get this thing done. Pull requests are welcome to tidy things up :D
