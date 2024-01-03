@@ -1,13 +1,11 @@
 import { readFileSync, writeFileSync } from 'fs';
 
-import { App, MarkdownFileInfo, Modal, Notice, Plugin, TFile, loadPdfJs, Editor, MarkdownView, WorkspaceLeaf, LinkCache } from 'obsidian';
+import { Modal, Notice, Plugin, TFile, loadPdfJs, Editor, MarkdownView, WorkspaceLeaf, LinkCache } from 'obsidian';
 
 import { PDFDocument, PDFDict, PDFPage, asPDFName } from 'pdf-lib'
 
 import { outlinePdfFactory } from '@lillallol/outline-pdf';
 import { outlinePdfDataStructure } from '@lillallol/outline-pdf-data-structure';
-
-import {walk, Break} from 'walkjs';
 
 import { PdfAnchorSettings, PdfAnchorSettingTab, DEFAULT_SETTINGS } from 'settings'
 import { PdfProcessingModal, PdfSelectModal } from 'ui';
