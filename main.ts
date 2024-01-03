@@ -34,7 +34,6 @@ interface PrintableMarkdownView extends MarkdownView {
 }
 
 
-
 export default class PdfAnchor extends Plugin {
 	
 	settings: PdfAnchorSettings;
@@ -319,7 +318,6 @@ export default class PdfAnchor extends Plugin {
 
 		// construct a string in the format that outline-pdf expects
 		let strOutline = "";
-		let numItems = 0;
 		let indentLevel = 0;
 		let previousHeadingDepth = 0;
 		for( let i=0; i<pdfBlockItems.length; i++ ){
