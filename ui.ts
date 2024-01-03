@@ -99,11 +99,13 @@ export class PdfProcessingModal extends ButtonBarModal {
 	private _closeButton:ButtonComponent;
 	private _isOpen:boolean;
 	private _barFill:HTMLDivElement;
+	private _openCallback?: (modal:PdfProcessingModal) => any;
 
-	constructor( app: App, windowTitle:string ) {
+	constructor( app: App, windowTitle:string, openCallback?:(modal:PdfProcessingModal) => any ) {
 	  super(app);
       this._windowTitle = windowTitle;
 	  this._isOpen = false;
+	  this._openCallback = openCallback;
 	}
 
 	onOpen(): void {
@@ -136,6 +138,10 @@ export class PdfProcessingModal extends ButtonBarModal {
 		)
 		
 		this.setCloseButtonEnabled( false );
+
+		if( this._openCallback ){
+			this._openCallback( this );
+		}
 	}
 
 	onClose() {
