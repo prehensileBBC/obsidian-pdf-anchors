@@ -221,10 +221,8 @@ export default class PdfAnchor extends Plugin {
 			}
 		} else {
 			this.reportError( `No cached links found for file ${noteFile}` );
-			debugger;
+			// debugger;
 		}
-
-		debugger;
 
 		// write modified noteText to file
 		await this.app.vault.modify( noteFile, noteText );
