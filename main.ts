@@ -53,15 +53,15 @@ export default class PdfAnchor extends Plugin {
 		});
 
 		this.registerEvent(
-			this.app.workspace.on("file-menu", (menu, file,source,leaf) => {
-				// debugger;
-				if (!file) return;
+			this.app.workspace.on("file-menu", (menu, file, source, leaf) => {
+				if(!file) return;
 				if(source != "more-options") return;
 				menu.addItem((item) => {
 					item.setTitle( `${strings.CommandPDFExport}...` )
 						.setIcon( "file-down" )
 						.onClick(() => {
 							const v = this.app.workspace.getActiveViewOfType( MarkdownView )!;
+							if( v.file != file ) return;
 							const e = v.editor;
 							this.fullExportCommand(e, v);
 						});
@@ -406,6 +406,10 @@ export default class PdfAnchor extends Plugin {
 		// const cachedHeadings = this.app.metadataCache.getCache( notePath )?.headings;
 		// console.log( cachedHeadings );
 
+		// TODO: read file async so UI isn't blocked
+		// 	I tried this, but pdfBuffer kept getting emptied before PDFDocument.load,
+		//	despite using pdfBuffer.slice(0) to make a copy for getOutlineForPdfBuffer
+		//	[shrug]
 		let pdfFile = readFileSync( pdfPath );
 		let pdfBuffer = pdfFile.buffer;
 
