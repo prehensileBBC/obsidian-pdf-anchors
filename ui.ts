@@ -76,7 +76,6 @@ export class PdfSelectModal extends ButtonBarModal {
 	}
 
 	onOkay(evt:MouseEvent){
-		// debugger;
 		if( this._onOkay ) this._onOkay(evt);
 		this.close();
 	}	
