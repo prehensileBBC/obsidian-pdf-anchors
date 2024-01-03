@@ -9,6 +9,6 @@
     "PDFFixingComplete" : "Anchor links restored.",
     "PDFFixingClose" : "Done", 
     "SelectPDF" : "Next, please select the exported PDF...",
-    "SelectPDFOkay" : "Select",
+    "SelectPDFOkay" : "Continue",
     "SelectPDFCancel" : "Cancel"
 }
