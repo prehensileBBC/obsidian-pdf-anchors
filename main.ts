@@ -52,6 +52,23 @@ export default class PdfAnchor extends Plugin {
 			},
 		});
 
+		this.registerEvent(
+			this.app.workspace.on("file-menu", (menu, file,source,leaf) => {
+				// debugger;
+				if (!file) return;
+				if(source != "more-options") return;
+				menu.addItem((item) => {
+					item.setTitle( `${strings.CommandPDFExport}...` )
+						.setIcon( "file-down" )
+						.onClick(() => {
+							const v = this.app.workspace.getActiveViewOfType( MarkdownView )!;
+							const e = v.editor;
+							this.fullExportCommand(e, v);
+						});
+				});
+			})
+		);
+
 		if( this.settings.advancedMode ){
 			this.addCommand({
 				id: 'convert-internal-links-to-dummies',
