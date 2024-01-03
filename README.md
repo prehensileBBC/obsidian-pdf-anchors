@@ -28,5 +28,4 @@ This is the export process used by the plugin:
 It's a pretty hacky workaround in other words; more brittle than I'd like and likely to break if anything changes in the way Obsidian's PDF export process works. Ideally, I'd like to see this plugin be made obsolete by equivalent features being implemented in Obsdian itself - until then, this hacky plugin will have to do :D 
 
 ### Pull requests welcome
-
-Also: I'll be honest with you: javascript / typescript is not my favourite programming language, especially when it comes to async stuff. There are places in the code where I basically just threw async / await around until it worked, and I've also liberally used ! where optional properties most probably exist, just to get this thing done. Pull requests are welcome to tidy things up :D
+ I'll be honest with you: javascript / typescript is not my favourite programming language, especially when it comes to async stuff. There are places in the code where I basically just threw async / await around until it worked, and I've also liberally used ! where optional properties most probably exist, just to get this thing done. Pull requests are welcome to tidy things up :D
