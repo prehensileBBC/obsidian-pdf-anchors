@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from 'fs';
 
-import { App, MarkdownFileInfo, Modal, Notice, Plugin, TFile, loadPdfJs, Editor, MarkdownView, WorkspaceLeaf } from 'obsidian';
+import { App, MarkdownFileInfo, Modal, Notice, Plugin, TFile, loadPdfJs, Editor, MarkdownView, WorkspaceLeaf, LinkCache } from 'obsidian';
 
 import { PDFDocument, PDFDict, PDFPage, asPDFName } from 'pdf-lib'
 
@@ -133,13 +133,8 @@ export default class PdfAnchor extends Plugin {
 
 	async fullExportCommand( editor: Editor, view: MarkdownView ){
 
-		// const currentFile = this.app.workspace.getActiveFile();
-		// if( !currentFile ) this.reportError( "Couldn't get active file" );
-
 		const currentFile = view.file!;
-		// keep a copy of note text pre-transform
-		//const noteTextOriginal:string = await this.app.vault.read( currentFile );
-
+		
 		// make a copy of the current note and operate on the copy
 		let parsed = path.parse( currentFile.path );
 		let name = `${parsed.name}.anchors`
@@ -148,14 +143,15 @@ export default class PdfAnchor extends Plugin {
 			currentFile,
 			path.format( fmt )
 		).then( (tempNote) => {
-				this.onTempNoteCreated( tempNote, view );
-			}
-		)
+			this.onTempNoteCreated( tempNote, currentFile, view );
+		})
 	}
 
-	async onTempNoteCreated( tempNote: TFile, view: MarkdownView ) {
+	async onTempNoteCreated( tempNote: TFile, originalNote: TFile, view: MarkdownView ) {
 		
-		await this.convertAllInternalLinksToDummies( tempNote );
+		// used cached links from original file since the cache won't contain any for the temp copy yet
+		const cachedLinks = this.app.metadataCache.getCache( originalNote.path )?.links;
+		await this.convertAllInternalLinksToDummies( tempNote, cachedLinks );
 
 		// open the temp copy of the note in a new tab
 		const openState = { active: false, eState: { active: false, focus: false } };
@@ -207,15 +203,13 @@ export default class PdfAnchor extends Plugin {
 		this.convertAllInternalLinksToDummies( currentFile! );
 	}*/
 
-	async convertAllInternalLinksToDummies( noteFile : TFile ) {
+	async convertAllInternalLinksToDummies( noteFile : TFile, cachedLinks?:LinkCache[] ) {
 
 		/* based heavliy on https://github.com/dy-sh/obsidian-consistent-attachments-and-links */
-
-		const links = this.app.metadataCache.getCache( noteFile.path )?.links;
 		let noteText = await this.app.vault.read( noteFile );
 		
-		if (links) {
-			for (let link of links) {
+		if (cachedLinks) {
+			for (let link of cachedLinks) {
 
 				// we're only interested in links to headings in the current note 
 				if( !link.original.startsWith("[[#") )
@@ -228,9 +222,14 @@ export default class PdfAnchor extends Plugin {
 				// rewrite link to an external dummy link
 				noteText = noteText.replace( link.original, dummyMarkdown );
 			}
+		} else {
+			this.reportError( `No cached links found for file ${noteFile}` );
+			debugger;
 		}
 
-		// write noteText back to original file
+		debugger;
+
+		// write modified noteText to file
 		await this.app.vault.modify( noteFile, noteText );
 	}
 
@@ -451,7 +450,7 @@ export default class PdfAnchor extends Plugin {
 
 		if( rewriteCount > 0 ) {
 
-			message = `✅ Complete! Restored ${rewriteCount} anchor links in file ${pdfPath}`;
+			message = `✅ Complete! Restored ${rewriteCount} anchor links in file: ${pdfPath}`;
 
 			if( this.settings.generateOutline ){
 				// get a copy of the pdf document containing an outline
