@@ -1,8 +1,13 @@
 import { readFileSync, writeFileSync } from 'fs';
-import { App, MarkdownFileInfo, Modal, Notice, Plugin, TFile, loadPdfJs,ButtonComponent } from 'obsidian';
+
+import { App, MarkdownFileInfo, Modal, Notice, Plugin, TFile, loadPdfJs, Editor, MarkdownView, WorkspaceLeaf } from 'obsidian';
+
 import { PDFDocument, PDFDict, PDFPage, asPDFName } from 'pdf-lib'
+
 import { outlinePdfFactory } from '@lillallol/outline-pdf';
 import { outlinePdfDataStructure } from '@lillallol/outline-pdf-data-structure';
+
+import {walk, Break} from 'walkjs';
 
 import { PdfAnchorSettings, PdfAnchorSettingTab, DEFAULT_SETTINGS } from 'settings'
 import { PdfProcessingModal, PdfSelectModal } from 'ui';
@@ -10,10 +15,11 @@ import { PdfProcessingModal, PdfSelectModal } from 'ui';
 import * as strings from 'strings.json';
 
 import * as pdfLib from "pdf-lib";
+import * as path from 'path';
 const outlinePdf = outlinePdfFactory(pdfLib);
 
 
-// Electron provides file paths
+// Electron provides file paths, declare that here so we can use it
 interface ElectronFile extends File {
 	path: string
 }
@@ -24,9 +30,11 @@ interface PdfBlockItem {
 	height : number
 }
 
-interface PrintableEditor extends MarkdownFileInfo {
+// MarkdownViews have an undocumented printToPdf function, declare it here so we can use it
+interface PrintableMarkdownView extends MarkdownView {
 	printToPdf: Function
 }
+
 
 
 export default class PdfAnchor extends Plugin {
@@ -42,14 +50,18 @@ export default class PdfAnchor extends Plugin {
 		this.addCommand({
 			id: 'full-export',
 			name: strings.CommandPDFExport,
-			callback: () => this.fullExportCommand()
+			editorCallback: ( editor: Editor, view: MarkdownView ) => {
+				this.fullExportCommand( editor, view );
+			},
 		});
-		
+
 		if( this.settings.advancedMode ){
 			this.addCommand({
 				id: 'convert-internal-links-to-dummies',
 				name: strings.CommandAdvancedToDummies,
-				callback: () => this.convertAllInternalLinksToDummiesCommand()
+				editorCallback: ( editor: Editor, view: MarkdownView ) => {
+					this.convertAllInternalLinksToDummies( view.file! )
+				},
 			});
 			this.addCommand({
 				id: 'convert-dummies-to-anchors',
@@ -119,31 +131,60 @@ export default class PdfAnchor extends Plugin {
 	 * FULL EXPORT
 	 */
 
-	async fullExportCommand(){
+	async fullExportCommand( editor: Editor, view: MarkdownView ){
 
-		const currentFile = this.app.workspace.getActiveFile();
-		if( !currentFile ) this.reportError( "Couldn't get active file" );
+		// const currentFile = this.app.workspace.getActiveFile();
+		// if( !currentFile ) this.reportError( "Couldn't get active file" );
 
+		const currentFile = view.file!;
 		// keep a copy of note text pre-transform
-		const noteTextOriginal:string = await this.app.vault.read( currentFile! );
+		//const noteTextOriginal:string = await this.app.vault.read( currentFile );
 
-		await this.convertAllInternalLinksToDummies( currentFile! );
+		// make a copy of the current note and operate on the copy
+		let parsed = path.parse( currentFile.path );
+		let name = `${parsed.name}.anchors`
+		let fmt = { ...parsed, name: name, base: `${name}${parsed.ext}` }
+		this.app.vault.copy(
+			currentFile,
+			path.format( fmt )
+		).then( (tempNote) => {
+				this.onTempNoteCreated( tempNote, view );
+			}
+		)
+	}
 
+	async onTempNoteCreated( tempNote: TFile, view: MarkdownView ) {
+		
+		await this.convertAllInternalLinksToDummies( tempNote );
+
+		// open the temp copy of the note in a new tab
+		const openState = { active: false, eState: { active: false, focus: false } };
+		const leaf = this.app.workspace.getLeaf( 'tab' );
+		leaf.openFile( tempNote, openState ).then( ()=>{
+			this.onTempFileOpenComplete( tempNote, leaf );
+		});
+	}
+
+	onTempFileOpenComplete( tempNote: TFile, openedLeaf:WorkspaceLeaf ){
+
+		// listen for the PDF export completion message
 		this.registerDomEvent(window, 'afterprint', (evt: Event) => {
-			this.onPDFSaveComplete( currentFile!, noteTextOriginal );
+			this.onPDFSaveComplete( tempNote );
 		},{
 			once: true
 		});
 
-		(this.app.workspace.activeEditor! as PrintableEditor).printToPdf();
+		// export PDF
+		const v = openedLeaf.view as MarkdownView;
+		(v as PrintableMarkdownView).printToPdf();
 	}
 
-	onPDFSaveComplete( originalNoteFile:TFile, originalNoteText: string ){
+	onPDFSaveComplete( tempFile:TFile ){
 
-		// PDF has been saved, so we can revert note file back to its contents pre-transformation
-		// write noteText back to original file
-		this.app.vault.modify( originalNoteFile, originalNoteText );
+		// PDF has been saved, so we can delete the temp copy of the original note file
+		this.app.vault.delete( tempFile );
 
+		// create a modal which tells the user what's happening next
 		this._currentModal = new PdfSelectModal(
 			this.app,
 			this.manifest.name,
@@ -159,15 +200,14 @@ export default class PdfAnchor extends Plugin {
 	 * Convert header / anchor links in the same document to dummy links
 	 */
 
+	/*
 	async convertAllInternalLinksToDummiesCommand() {
 		const currentFile = this.app.workspace.getActiveFile();
 		if( !currentFile ) this.reportError( "Couldn't get active file" );
 		this.convertAllInternalLinksToDummies( currentFile! );
-	}
+	}*/
 
 	async convertAllInternalLinksToDummies( noteFile : TFile ) {
-
-		//TODO: save altered note text to a new note file, don't overwrite existing one
 
 		/* based heavliy on https://github.com/dy-sh/obsidian-consistent-attachments-and-links */
 
@@ -336,10 +376,9 @@ export default class PdfAnchor extends Plugin {
 
 	async convertDummiesToAnchors( pdfPath:string, notePath?:string ) {
 		
-		if( !notePath ) notePath =  this.app.workspace.getActiveFile()!.path;
-		const cachedHeadings = this.app.metadataCache.getCache( notePath )?.headings;
-		
 		// TODO: use cachedHeadings to reconstruct headers which have broken across lines in the PDF 
+		// if( !notePath ) notePath =  this.app.workspace.getActiveFile()!.path;
+		// const cachedHeadings = this.app.metadataCache.getCache( notePath )?.headings;
 		// console.log( cachedHeadings );
 
 		const modalProcessing = new PdfProcessingModal(
@@ -448,13 +487,5 @@ export default class PdfAnchor extends Plugin {
 			// if the user's already closed the modal, show a Notice instead
 			new Notice( message );
 		}
-	}
-
-	onSaveComplete(){
-
-	}
-
-	onSaveFailed(reason:any){
-
 	}
 }
