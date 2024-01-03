@@ -1,7 +1,7 @@
 {
 	"id": "obsidian-pdf-anchors",
 	"name": "PDF Anchors",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"minAppVersion": "0.15.0",
 	"description": "Preserves links to headings within the same note (anchor links) when exporting to PDF.",
 	"author": "prehensile",
