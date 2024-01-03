@@ -234,12 +234,15 @@ export default class PdfAnchor extends Plugin {
 	 */
 
 	async convertDummiesToAnchorsCommand() {
+		
 		if( this._currentModal ){
 			this._currentModal.close();
 		}
+		
 		this.openFileDialog( (files:FileList) => {
 			this.convertDummiesToAnchors(
-				(files[0] as ElectronFile).path )
+				(files[0] as ElectronFile).path ), 
+				null
 		});
 	}
 
@@ -366,18 +369,25 @@ export default class PdfAnchor extends Plugin {
 		return -1;
 	}
 
-	async convertDummiesToAnchors( pdfPath:string, notePath?:string ) {
+	convertDummiesToAnchors( pdfPath:string, notePath?:string ) {
+		
+		const modalProcessing = new PdfProcessingModal(
+			this.app,
+			this.manifest.name,
+			(modalProcessing) => {
+				this.convertDummiesToAnchorsProcessor( modalProcessing, pdfPath, notePath );
+			}
+		);
+
+		modalProcessing.open();
+	}
+
+	async convertDummiesToAnchorsProcessor(  modalProcessing:PdfProcessingModal, pdfPath:string, notePath?:string ){
 		
 		// TODO: use cachedHeadings to reconstruct headers which have broken across lines in the PDF 
 		// if( !notePath ) notePath =  this.app.workspace.getActiveFile()!.path;
 		// const cachedHeadings = this.app.metadataCache.getCache( notePath )?.headings;
 		// console.log( cachedHeadings );
-
-		const modalProcessing = new PdfProcessingModal(
-			this.app,
-			this.manifest.name
-		);
-		modalProcessing.open();
 
 		let pdfFile = readFileSync( pdfPath );
 		let pdfBuffer = pdfFile.buffer;
