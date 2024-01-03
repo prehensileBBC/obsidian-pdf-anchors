@@ -450,6 +450,7 @@ export default class PdfAnchor extends Plugin {
 
 		if( rewriteCount > 0 ) {
 
+			// TODO: make this prettier when displayed in the modal
 			message = `✅ Complete! Restored ${rewriteCount} anchor links in file: ${pdfPath}`;
 
 			if( this.settings.generateOutline ){
@@ -472,6 +473,7 @@ export default class PdfAnchor extends Plugin {
 			}
 			
 		} else {
+			// TODO: make this prettier when displayed in the modal
 			message = `⚠ Couldn't find any anchor links to restore in PDF file ${pdfPath}. This probably means something went wrong :(`
 		}
 
