@@ -336,7 +336,6 @@ export default class PdfAnchor extends Plugin {
 		return [outlinePdfDataStructure( strOutline, pdf.numPages ), strOutline];
 	}
 
-
 	anchorReferenceForDummyUri( dummyUri: string ) {
 		// example dummy uri: http://dummy.link/dummy#A%20divided%20world
 		return decodeURI( new URL( dummyUri ).hash );
